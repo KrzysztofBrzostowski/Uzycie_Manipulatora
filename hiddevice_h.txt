@@ -1,0 +1,438 @@
+/*
+ * MSP430 USB HID Application
+ *
+ * Software to develop Windows HID application using the HID APIs
+ *
+ * Copyright (C) {2010} Texas Instruments Incorporated - http://www.ti.com/ 
+ * 
+ * 
+ *  Redistribution and use in source and binary forms, with or without 
+ *  modification, are permitted provided that the following conditions 
+ *  are met:
+ *
+ *    Redistributions of source code must retain the above copyright 
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ *    Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the 
+ *    documentation and/or other materials provided with the   
+ *    distribution.
+ *
+ *    Neither the name of Texas Instruments Incorporated nor the names of
+ *    its contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
+ *  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ *  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
+ *  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+ *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
+ *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+*/
+
+//******************************************************************************
+//
+//! \file HidDevice.h
+//!
+//! \brief       
+//!
+//! \par    Project:
+//!             MSP430 USB HID Interface 
+//!
+//! \par    Developed using:
+//!             MS Visual C++ 8.0
+//!
+//! \author Rostyslav Stolyar
+//!         \n  (c) 2009 by Texas Instruments
+//!      \n Anne Flinchbaugh
+//!         \n  (c) 2010 by Texas Instruments 
+//!
+//! \version     1.0.1.0
+//!
+//! \par    Supported API calls:
+//!              - HID_Init()
+//!              - HID_Open()
+//!              - HID_Close()
+//!              - HID_GetNumOfInterfaces()
+//!              - HID_WriteFile()
+//!              - HID_ReadFile()
+//!              - HID_FlushBuffer()
+//!              - HID_GetSerNums()
+//!              - HID_GetVersionNumber()
+//!              - HID_IsDeviceAffected()
+//!              - HID_RegisterForDeviceNotification()
+//!              - HID_UnRegisterForDeviceNotification()
+//!
+//! \par    Version History:
+//!             - Version 0.0.1.0 - 20 February 2007
+//!         \n    Internal version, no release
+//!         \n
+//!             - Version 0.9.0.0 - 20 March 2009
+//!         \n    Adapted for using with MSP430F5529 HID stack
+//!         \n
+//!             - Version 1.0.0.0 - July 2010
+//!         \n    Adapted for using with Composite stack and reading serial 
+//!               numbers
+//!             - Version 1.0.1.0 - December 2010
+//!         \n    Updated code comments.
+//!         \n    Renamed HID_GetNumberOfDevices to HID_GetNumberOfInterfaces
+//!               to support Composite devices
+//
+//******************************************************************************
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef __HidDevice_h_
+#define __HidDevice_h_
+
+//! Defines the maximum length of a serial number
+#define SERNUM_LEN 40
+
+//! Defines the maximum number of physical devices 
+#define MAX_PHYS_DEVICES 6
+
+//! \name HID Device return codes
+//! @{
+//
+//! HID action/transfer was successful
+#define HID_DEVICE_SUCCESS                0x00
+//! HID device was not found
+#define HID_DEVICE_NOT_FOUND              0x01
+//! HID device is not opened
+#define HID_DEVICE_NOT_OPENED             0x02
+//! HID device is allready opened
+#define HID_DEVICE_ALREADY_OPENED         0x03
+//! Timeout occurs during transfer
+#define HID_DEVICE_TRANSFER_TIMEOUT       0x04
+//! HID transfer failed
+#define HID_DEVICE_TRANSFER_FAILED        0x05
+//! Invalid handle
+#define HID_DEVICE_HANDLE_ERROR           0x06
+//! Unknown error
+#define HID_DEVICE_UNKNOWN_ERROR          0xFF
+//! @}
+
+// Enabled only when debugging HID connection issues
+//#define DEBUG_MODE                        
+
+//******************************************************************************
+//
+//! \brief  Device information structure.
+//
+//******************************************************************************
+struct strHidDevice{
+
+    //! Handle for hid device
+    HANDLE hndHidDevice;
+    //! Indicator if device is opened
+    BOOL bDeviceOpen;                
+
+    //! Timeout for GetReport requests
+    UINT uGetReportTimeout;            
+    //! Timeout for SetReport requests
+    UINT uSetReportTimeout;            
+
+    //! Asynchronous I/O structure
+    OVERLAPPED oRead;
+    //! Asynchronous I/O structure
+    OVERLAPPED oWrite;
+
+    //! Maximum length of InReport's
+    WORD wInReportBufferLength;        
+    //! Maximum length of OutReport's
+    WORD wOutReportBufferLength;    
+
+    //! InBuffer contains data, if InReport provides more data then the application actual need
+    BYTE inBuffer[8192];
+    //! Number of current used bytes in inBuffer
+    WORD inBufferUsed;
+};
+
+//******************************************************************************
+//
+//! A structure that tracks the number of serial numbers
+//
+//******************************************************************************
+struct strTrackSerialNumbers
+{
+    //! Index number
+    DWORD deviceNum;
+
+    //! Serial number of physical device 
+    char serialNum[SERNUM_LEN];
+};
+
+//******************************************************************************
+//
+//! \addtogroup hiddevice_api
+//! @{
+//
+//******************************************************************************
+
+//******************************************************************************
+//
+//! \brief  Close a HID Device.
+//!
+//!         This function will close a HID device based on the HID structure
+//!
+//! \param  pstrHidDevice Structure which contains important data of an HID 
+//!                       device
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS 
+//!         \n \b HID_DEVICE_NOT_OPENED
+//!         \n \b HID_DEVICE_HANDLE_ERROR
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_Close(struct strHidDevice* pstrHidDevice);
+
+//******************************************************************************
+//
+//! \brief  Flush USB buffer for the given device
+//!
+//! \param  pstrHidDevice   Structure which contains important data of an HID 
+//!                         device.
+//! 
+//! \return Returns the error status, as one of
+//!         \n \b  HID_DEVICE_SUCCESS
+//!         \n \b  HID_DEVICE_HANDLE_ERROR
+//!         \n \b  HID_DEVICE_UNKNOWN_ERROR
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_FlushBuffer(struct strHidDevice* pstrHidDevice);
+
+//******************************************************************************
+//
+//! \brief  Gets the number of HID devices
+//!
+//!         This function will return the number of interfaces connected with a
+//!         specified VID, PID and serial number, if no devices are connected,
+//!         it will return a 0
+//!
+//! \param  vid         Vendor-Id of the device 
+//! \param  pid         Product-Id of the device
+//! \param  numSerNums  Total number of connected physical devices
+//!
+//! \return Return the number of connected devices with the specific VID, PID,
+//!         and serial number.
+//
+//******************************************************************************
+__declspec(dllexport) DWORD HID_GetNumOfInterfaces(WORD vid, 
+                          WORD pid, 
+                          DWORD numSerNums);
+
+//******************************************************************************
+//
+//! \brief  Gets the number of serial number and serial number list
+//!
+//!         Scans the HID Devices on the system for any whose VID/PID match the
+//!         ones specified.  For every one it finds, it returns that device's
+//!         serial number in serialNumList.  Every physical USB device within a
+//!         given VID/PID space has a unique serial number; therefore, each 
+//!         item in the list corresponds with a separate physical USB device 
+//!         attached to this host; that is, different physical instances of the
+//!         same product or design.  The function returns the total number of
+//!         serial numbers found; if none are found, it returns 0.
+//!
+//! \param  vid             Vendor-ID of the device
+//! \param  pid             Product-ID of the device
+//! \param  serialNumList   List of serial numbers corresponding to the passed 
+//!                         VID and PID 
+//!
+//! \return Returns the number of connected physical devices with the specific
+//!         VID and PID
+//
+//******************************************************************************
+__declspec(dllexport) DWORD HID_GetSerNums(WORD vid, 
+                     WORD pid, 
+                     struct strTrackSerialNumbers * serialNumList);
+
+//******************************************************************************
+//
+//! \brief  Returns the version number of a device.
+//!
+//! \param  pstrHidDevice   Structure which contains important data of an HID
+//!                         device.
+//! \param  VersionNumber   Pointer to USHORT variable.
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_HANDLE_ERROR
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_GetVersionNumber(struct strHidDevice* pstrHidDevice, 
+                          USHORT * VersionNumber);
+
+//******************************************************************************
+//
+//! \brief  Init structure with default values.
+//!
+//!         It is important to call HID_Init() before calling HID_Open() to 
+//!         avoid unpredictable behavoir.
+//!
+//! \param  pstrHidDevice   Structure which contains important data of a HID
+//!                         device
+//!
+//! \return None
+//
+//******************************************************************************
+__declspec(dllexport) void HID_Init(struct strHidDevice* pstrHidDevice);
+
+//******************************************************************************
+//
+//! \brief  This has to be called inside WM_ON_DEVICECHANGE notification window
+//!
+//!         This function checks if the particular HID device structure is
+//!         still connected or disconnected.
+//!
+//! \param  pstrHidDevice   Structure which contains important data of an HID 
+//!                         device.
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_HANDLE_ERROR
+//
+//******************************************************************************
+__declspec(dllexport) BOOL HID_IsDeviceAffected(struct strHidDevice* pstrHidDevice);
+
+//******************************************************************************
+//
+//! \brief  Open a HID Device.
+//!
+//!         This function opens the HID device associated with the HID interface
+//!         'deviceIndex' (0-7), on the physical device described by the VID, 
+//!         PID, and serial number. 
+
+//! \param  pstrHidDevice   Structure which contains important data of an HID 
+//!                         device
+//! \param  vid             Vendor-ID of the device
+//! \param  pid             Product-ID of the device 
+//! \param  deviceIndex     Index of the device.If only one HID is connected, 
+//!                         deviceIndex is 0.
+//!                           - Starts with zero
+//!                           - Maximum value is (HID_GetNumOfInterfaces() - 1)
+//! \param  serialNumber    Serial number of device to be opened.  
+//! \param  totalDevNum     Total number of interfaces associated with the
+//!                         serial number 
+//! \param  totalSerNum     Total number of physical devices associated with
+//!                         the VID/PID
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_NOT_FOUND
+//!         \n \b HID_DEVICE_ALREADY_OPENED
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_Open(struct strHidDevice* pstrHidDevice, 
+              WORD vid, 
+              WORD pid, 
+              DWORD deviceIndex, 
+              char serialNumber[SERNUM_LEN],
+              DWORD totalDevNum,
+              DWORD totalSerNum);
+
+//******************************************************************************
+//
+//! \brief  Reads a data stream from the given HID device.
+//!
+//!         Prefixed report ID will be skipped.
+//!
+//! \param  pstrHidDevice   Structure which contains important data of an HID 
+//!                         device
+//! \param  buffer          Pointer to buffer in which will be written
+//! \param  bufferSize      Number of bytes to read
+//! \param  bytesReturned   Number of actual read bytes 
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_NOT_OPENED
+//!         \n \b HID_DEVICE_TRANSFER_TIMEOUT
+//!         \n \b HID_DEVICE_TRANSFER_FAILED
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_ReadFile(struct strHidDevice* pstrHidDevice, 
+                  BYTE* buffer, 
+                  DWORD bufferSize, 
+                  DWORD* bytesReturned);
+
+//******************************************************************************
+//
+//! \brief  Registers a device for program Windows notification. 
+//!
+//!         Registers the window pointed to by handle hWnd to receive 
+//!         notification when devices are added or removed from the system.
+//!
+//! \param   hWnd               Windows handle
+//! \param   diNotifyHandle     Device notification handle pointer address
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_HANDLE_ERROR
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_RegisterForDeviceNotification(HWND hWnd, 
+                                       HDEVNOTIFY* diNotifyHandle);
+
+
+//******************************************************************************
+//
+//! \brief  Un-Registers a device from Windows notification.
+//!
+//!         Un-registers the window pointed to by handle hWnd to receive 
+//!         notification when devices are added or removed from the system.
+//!
+//! \param  diNotifyHandle: Device notification handle pointer address.
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_HANDLE_ERROR
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_UnRegisterForDeviceNotification(HDEVNOTIFY* diNotifyHandle);
+
+//******************************************************************************
+//
+//! \brief  Writes a data stream to the given HID device.
+//!
+//!         Needed report IDs will be generated automatically.
+//!
+//! \param  pstrHidDevice   Structure which contains important data of an HID 
+//!                         device
+//! \param  buffer          Buffer which will be send
+//! \param  bufferSize      Number of bytes to send
+//!
+//! \return Returns the error status, as one of
+//!         \n \b HID_DEVICE_SUCCESS
+//!         \n \b HID_DEVICE_NOT_OPENED
+//!         \n \b HID_DEVICE_TRANSFER_TIMEOUT
+//!         \n \b HID_DEVICE_TRANSFER_FAILED
+//
+//******************************************************************************
+__declspec(dllexport) BYTE HID_WriteFile(struct strHidDevice* pstrHidDevice, 
+                   BYTE* buffer, 
+                   DWORD bufferSize);
+
+//******************************************************************************
+// Close the Doxygen group.
+//! @}
+//
+//******************************************************************************
+
+
+__declspec(dllexport) struct strHidDevice* HID_DeviceCreate();
+
+
+//__declspec(dllexport) int /* __cdecl */ pomnoz(int a,int b);
+
+
+#endif 
+#ifdef __cplusplus
+}
+#endif

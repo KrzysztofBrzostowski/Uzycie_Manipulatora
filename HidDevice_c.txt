@@ -1,0 +1,979 @@
+/*
+ * MSP430 USB HID Application
+ *
+ * Software to develop Windows HID application using the HID APIs
+ *
+ * Copyright (C) {2010} Texas Instruments Incorporated - http://www.ti.com/ 
+ * 
+ * 
+ *  Redistribution and use in source and binary forms, with or without 
+ *  modification, are permitted provided that the following conditions 
+ *  are met:
+ *
+ *    Redistributions of source code must retain the above copyright 
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ *    Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the 
+ *    documentation and/or other materials provided with the   
+ *    distribution.
+ *
+ *    Neither the name of Texas Instruments Incorporated nor the names of
+ *    its contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
+ *  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ *  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
+ *  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+ *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
+ *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+*/
+
+#include <windows.h>
+#include <Dbt.h>
+#include "hiddevice.h"
+#include <hidsdi.h>
+#include "setupapi.h"
+#include <string.h>
+#include <stdio.h>
+
+//#include <stdlib.h>   // For _MAX_PATH definition
+#include <malloc.h>
+
+
+#ifdef DEBUG_MODE
+#include <stdlib.h> // DEBUG: library include for file write
+#endif
+
+BYTE SetFeature(struct strHidDevice* pstrHidDevice, BYTE* buffer);
+
+//******************************************************************************
+// Global variables
+//******************************************************************************
+DWORD err = 0; // for debug
+
+#ifdef DEBUG_MODE
+FILE* writeFile; // DEBUG: Initialize a writeFile
+
+int HID_CreateNewFileForDebugMode( char *filename ) //Creates a new file:
+{
+   if( fopen_s( &writeFile, filename, "a+" ) )
+   {
+      return FALSE;
+   }
+   else
+   {
+      return TRUE;
+   }
+}
+#endif
+
+
+__declspec(dllexport) struct strHidDevice* proc01()
+{
+	struct strHidDevice * result= (struct strHidDevice*) malloc(sizeof(struct strHidDevice));
+	
+//	result = (struct strHidDevice*) malloc(sizeof(struct strHidDevice));
+	return result;
+}
+
+
+
+__declspec(dllexport) struct strHidDevice* HID_DeviceCreate()
+{
+
+	struct strHidDevice * result= (struct strHidDevice*) malloc(sizeof(struct strHidDevice));
+	
+//	result = (struct strHidDevice*) malloc(sizeof(struct strHidDevice));
+	return result;
+
+}
+
+__declspec(dllexport) void HID_Init(struct strHidDevice* pstrHidDevice)
+{
+
+	//int zzzz = sizeof();
+
+    pstrHidDevice->hndHidDevice = NULL;
+    pstrHidDevice->bDeviceOpen = FALSE;
+    pstrHidDevice->inBufferUsed = 0;
+    if(pstrHidDevice->uGetReportTimeout == NULL)
+    {
+        pstrHidDevice->uGetReportTimeout = 600;
+    }
+    if(pstrHidDevice->uSetReportTimeout == NULL)
+    {
+        pstrHidDevice->uSetReportTimeout = 500;
+    }
+    pstrHidDevice->wInReportBufferLength = 0;
+    pstrHidDevice->wOutReportBufferLength = 0;
+
+    //clean overlapped structures
+    memset(&pstrHidDevice->oRead, 0, sizeof(pstrHidDevice->oRead));
+    memset(&pstrHidDevice->oWrite, 0, sizeof(pstrHidDevice->oWrite));
+}
+
+//
+// This function will obtain the device path of an HID device by it's index.
+// TRUE is returned if the index is found, and contains a valid device path
+// FALSE is returned if the index is not found
+//
+__declspec(dllexport) BYTE GetHidDevicePath(WORD VID, WORD PID, DWORD index, char* devicePath)
+{
+    BYTE status = HID_DEVICE_UNKNOWN_ERROR;
+
+    GUID        hidGuid;
+    HDEVINFO    hHidDeviceInfo = NULL;
+
+    // Obtain the HID GUID
+    HidD_GetHidGuid(&hidGuid);
+
+    // Use the HID GUID to get a handle to a list of all HID devices connected
+    hHidDeviceInfo = SetupDiGetClassDevs(&hidGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+
+    // If the device info was NULL, return an error code
+    if (hHidDeviceInfo != NULL)
+    {
+        SP_DEVICE_INTERFACE_DATA hidDeviceInterfaceData;
+        hidDeviceInterfaceData.cbSize = sizeof(hidDeviceInterfaceData);
+
+        // Check that the index is less than the max number of USB devices connectable
+        if (index < 128)
+        {
+            // Query the device using the index to get the interface data
+            BOOL hidResult = hidResult = SetupDiEnumDeviceInterfaces(hHidDeviceInfo, 0, &hidGuid, index, &hidDeviceInterfaceData);
+
+            // If a successful query was made, use it to get the detailed data of the device
+            if (hidResult)
+            {
+                BOOL detailResult;
+                DWORD length, required;
+                PSP_DEVICE_INTERFACE_DETAIL_DATA hidDeviceInterfaceDetailData;
+
+                // Obtain the length of the detailed data structure, then allocate space and retrieve it
+                SetupDiGetDeviceInterfaceDetail(hHidDeviceInfo, &hidDeviceInterfaceData, NULL, 0, &length, NULL);
+                hidDeviceInterfaceDetailData = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(length);
+
+                if (hidDeviceInterfaceDetailData)
+                {
+                    char strVidPid[40];
+                    char strTmp[40];
+
+                    hidDeviceInterfaceDetailData->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+                    detailResult = SetupDiGetDeviceInterfaceDetail(hHidDeviceInfo, &hidDeviceInterfaceData, hidDeviceInterfaceDetailData, length, &required, NULL);
+                    
+                    // Create our vid-pid string like "vid_0451&pid_f401"
+                    strcpy(strVidPid, "vid_");
+                    sprintf(strTmp, "%04x", VID);
+                    strcat(strVidPid, strTmp);
+                    
+                    strcat(strVidPid, "&pid_");
+                    sprintf(strTmp, "%04x", PID);
+                    strcat(strVidPid, strTmp);
+
+                    #ifdef DEBUG_MODE
+                    fprintf_s(writeFile, "Device Path: "); //DEBUG:
+                    fprintf_s(writeFile, hidDeviceInterfaceDetailData->DevicePath); // DEBUG: write device path
+                    fprintf_s(writeFile, "\r\n"); //DEBUG:
+                    #endif
+
+                    // If getting the device detail provides a valid result, then copy its device
+                    // path into the device path argument pointer and set status to TRUE
+                    if (detailResult && ( strstr(hidDeviceInterfaceDetailData->DevicePath, strVidPid) 
+                                          ))
+                    {
+                        strcpy(devicePath, hidDeviceInterfaceDetailData->DevicePath);
+                        status = HID_DEVICE_SUCCESS;
+                        #ifdef DEBUG_MODE
+                        fprintf_s(writeFile, "Device Opened successfully\r\n"); //DEBUG:
+                        #endif
+                    }
+
+                    // Deallocate space for the detailed data structure
+                    free(hidDeviceInterfaceDetailData);
+                }
+            }
+        }    
+    }
+
+    return status;
+}
+
+    // This function attempts to open an HID device using a specific VID and PID. If it succeeds
+    // then a handle is returned. If it fails, then INVALID_HANDLE_VALUE is returned.
+    // If the VID and PID have a single HID interface (numDevices = 1), the function attempts to 
+    // open the device without sharing.  If numDevices is 0 or greater than 1, or if the first 
+    // attempt to open the device caused a sharing violation, the function
+    // opens the device with FILE_SHARE_READ and FILE_SHARE_WRITE.
+HANDLE OpenDeviceByVidPid(char* devicePath, 
+                          WORD vid, 
+                          WORD pid, 
+                          DWORD * err, 
+                          DWORD numDevices)
+{
+    // Open the device
+
+    HANDLE hHidDeviceHandle;
+    int count =0;
+
+    // This loop first attempts to open the device without sharing if there is exactly one HID interface on the device (numDevices =1).
+    // If another process has already opened a handle to the device, a sharing violation will occur.  The device is 
+    // then opened with sharing, since the only alternative would be to fail the operation.  
+    // If there is more than one HID interface on the physical device, it is opened with sharing to 
+    // avoid sharing violations that occur when accessing composite devices with this application.  
+
+    while(count<2)
+    {
+        if(count == 0 && numDevices ==1)            // If there's one interface and first attempt to open, open without file share
+        {
+            hHidDeviceHandle = CreateFile(devicePath, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
+        }
+        else                                       // Open with file share mode
+        {
+            hHidDeviceHandle = CreateFile(devicePath,GENERIC_READ | GENERIC_WRITE,FILE_SHARE_READ | FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,NULL);
+        }
+        *err = GetLastError();
+        if(*err == ERROR_SHARING_VIOLATION)     
+        {
+            count ++;                    
+        }
+        else
+            break;
+    }
+
+    #ifdef DEBUG_MODE // DEBUG: Print error code
+    if(*err == 0x00)
+    {
+      fprintf_s(writeFile, "File Created Successfully\r\n"); //DEBUG:
+    }
+    else
+    {
+      char myTempVar[33] = {0}; 
+       _ultoa_s(*err,myTempVar,33,16);
+      fprintf_s(writeFile, "File failed to be created. Error Code: "); // DEBUG:
+      fprintf_s(writeFile, myTempVar); 
+      fprintf_s(writeFile, "\r\n"); 
+    }
+    #endif
+  
+    // Check that the device opened successfully
+    if (hHidDeviceHandle != INVALID_HANDLE_VALUE)
+    {
+        HIDD_ATTRIBUTES    hidDeviceAttributes;
+
+        // Get the attributes of the HID device
+        if (HidD_GetAttributes(hHidDeviceHandle, &hidDeviceAttributes))
+        {
+            // Close the handle if either the VID or the PID don't match
+            if ((hidDeviceAttributes.VendorID != vid) || (hidDeviceAttributes.ProductID != pid))
+            {
+                CloseHandle(hHidDeviceHandle);
+                hHidDeviceHandle = INVALID_HANDLE_VALUE;
+            }
+        }
+        else
+        {
+            CloseHandle(hHidDeviceHandle);
+            hHidDeviceHandle = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    return hHidDeviceHandle;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_Close(struct strHidDevice* pstrHidDevice)
+{
+    BYTE status = HID_DEVICE_SUCCESS;
+
+    // Check to see if the device is opened, otherwise return an error code
+    if (pstrHidDevice->bDeviceOpen == TRUE)
+    {
+        // Check that we have valid handle values, otherwise return an error code
+        if ((pstrHidDevice->hndHidDevice != INVALID_HANDLE_VALUE) &&
+            (pstrHidDevice->hndHidDevice != NULL))
+        {
+            ResetEvent(pstrHidDevice->oRead.hEvent);
+            ResetEvent(pstrHidDevice->oWrite.hEvent);
+            CloseHandle(pstrHidDevice->hndHidDevice);
+            CloseHandle(pstrHidDevice->oRead.hEvent);
+            CloseHandle(pstrHidDevice->oWrite.hEvent);
+            pstrHidDevice->hndHidDevice = INVALID_HANDLE_VALUE;
+            pstrHidDevice->bDeviceOpen = FALSE;
+        }
+        else
+        {
+            status = HID_DEVICE_HANDLE_ERROR;
+        }
+    }
+    else
+    {
+        status = HID_DEVICE_NOT_OPENED;
+    }
+    return status;    
+}
+
+//******************************************************************************
+
+__declspec(dllexport) DWORD HID_GetNumOfInterfaces(WORD vid, 
+                          WORD pid, 
+                          DWORD numSerNums)
+{
+    // This function will return the number of HID interfaces on any attached physical USB device with the specified VID, PID
+    // and serial number.  If no devices are connected, it will return a 0
+
+    DWORD deviceNum = 0;
+    char devicePath[MAX_PATH];
+    DWORD i=0,max=0;
+    DWORD error = 0;
+    BYTE deviceStatus;
+    BOOL match = FALSE;
+    
+    // Loop through to check all of the HID Device paths available
+    for(i = 0; i <= 128 ; i++)
+    {
+        // Get HID device path based on VID and PID
+        deviceStatus = GetHidDevicePath(vid, pid, i, devicePath);
+        error = GetLastError();
+        if(deviceStatus == HID_DEVICE_SUCCESS)
+        {
+            // Attempt to open the device by VID and PID
+            HANDLE hHidDeviceHandle = OpenDeviceByVidPid(devicePath, vid, pid, &error,0);
+            
+            // Check that the device is opened, the handle is valid, and the serial number matches the current selection
+            if (hHidDeviceHandle != INVALID_HANDLE_VALUE || error == ERROR_SHARING_VIOLATION)
+            {
+                match = TRUE;
+                max++;
+                CloseHandle(hHidDeviceHandle);
+            }
+            else
+            {
+                CloseHandle(hHidDeviceHandle);
+            }
+        }
+    }
+
+    if(match)
+    {
+        if(numSerNums == 0)
+        {
+            return 0;
+        }
+        else
+        {
+            return (max/numSerNums);
+        }
+    }
+    else
+    {
+        return (max);
+    }
+}
+
+//******************************************************************************
+
+__declspec(dllexport) DWORD HID_GetSerNums(WORD vid,
+                     WORD pid,
+                     struct strTrackSerialNumbers * serialNumList)
+{
+    DWORD numDevices = 0;
+    char devicePath[MAX_PATH];
+    wchar_t HID_Serial_Number[SERNUM_LEN];
+    size_t convertedChars=0;
+    char SerNum[SERNUM_LEN];
+    char nullStr[SERNUM_LEN];
+    DWORD i=0,j=0,first=0,count=1;
+    int max = 0;
+    DWORD oldDev=0,error=0,current_index=0;
+    BYTE deviceStatus;
+
+
+//char zzzzz=sizeof(char);
+
+    memset(&nullStr,0,SERNUM_LEN); 
+    // Loop through to check all of the HID Device paths available
+    for(i = 0; i <= 128 ; i++)
+    {
+        // Get HID device path based on VID and PID
+        deviceStatus = GetHidDevicePath(vid, pid, i, devicePath);
+
+        if(deviceStatus == HID_DEVICE_SUCCESS)
+        {
+            // Attempt to open the device by VID and PID
+            HANDLE hHidDeviceHandle = OpenDeviceByVidPid(devicePath, vid, pid, &error,0);
+            
+            // Check that the device is opened and the handle is valid
+            if (hHidDeviceHandle != INVALID_HANDLE_VALUE || error == ERROR_SHARING_VIOLATION)
+            {
+                //Get serial number and convert to type char 
+                // Checks if serial number returned a valid string.
+                if(HidD_GetSerialNumberString(hHidDeviceHandle,HID_Serial_Number,sizeof(HID_Serial_Number)))
+                {
+                    wcstombs_s(&convertedChars, SerNum, wcslen(HID_Serial_Number)+1, HID_Serial_Number, _TRUNCATE);
+
+                    oldDev=0;
+
+                    for(j=0;j<numDevices;j++)
+                    {
+                        //Check to see if serial number is already in list
+                        if(!strcmp(serialNumList[j].serialNum,SerNum))
+                        {
+                            oldDev=1;
+                        }
+
+                    }
+                    if((SerNum[0]==0x00)&& first==1 && oldDev==1)  //Check to see if Serial Number does not exist for device
+                    {
+                        if(devicePath[26] == 'm')  //multiple interfaces with this vid/pid
+                        {
+                            if(max < atoi(&devicePath[30]))
+                            {
+                                max = atoi(&devicePath[30]);
+                            }
+                            count++; 
+                        }
+                        else  //single interface with this vid/pid
+                        {
+                            count++; 
+                        }
+                    }
+                    if(oldDev == 0 && count == 1) //Increment number of unique physical devices with VID and PID (new serial number)
+                    {
+                        first =1;
+                        if(numDevices < MAX_PHYS_DEVICES)
+                        {
+                            strcpy(serialNumList[numDevices].serialNum,SerNum);
+                            numDevices++;
+                        }
+                    }
+                    CloseHandle(hHidDeviceHandle);
+                }
+            }
+        }
+    }
+    if(count > 2)
+    {
+        for(j = numDevices; j < (count/(max+1)); j++)
+        {
+            strcpy(serialNumList[numDevices].serialNum,SerNum);
+        }
+        return count/(max+1);
+    }
+    else if(count == 2 && numDevices != 2)
+    {
+        for(j = numDevices; j < (count/(max+1)); j++)
+        {
+            strcpy(serialNumList[numDevices].serialNum,SerNum);
+        }
+        return count/(max+1);
+    }
+    else
+        return numDevices;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_Open(struct strHidDevice* pstrHidDevice, 
+              WORD vid,
+              WORD pid,
+              DWORD deviceIndex,
+              char serialNumber[SERNUM_LEN],
+              DWORD totalDevNum,
+              DWORD totalSerNum)
+{
+    HANDLE hHidDeviceHandle;
+    BYTE status = HID_DEVICE_SUCCESS;
+    wchar_t HID_Serial_Number[SERNUM_LEN];
+    char devicePath[MAX_PATH];
+    DWORD currentIndex = 0;
+    DWORD deviceNum = 0;
+    DWORD total = 0;
+    DWORD count = 0;
+    BOOL found = FALSE;
+    BOOL matchSerNum = TRUE;
+    DWORD error = 0;
+    size_t convertedChars=0;
+    char SerNum[SERNUM_LEN];
+    BYTE deviceStatus = HID_DEVICE_SUCCESS;
+    char newSerNum[SERNUM_LEN];
+
+    // Make a copy of the incoming serial number
+    strcpy(newSerNum,serialNumber);
+
+    // Ensure that the we don't already have an open device
+    if (pstrHidDevice->bDeviceOpen)
+    {
+        status = HID_DEVICE_ALREADY_OPENED;
+    }
+
+    // Begin to look for the device if it is not opened
+    if (status == HID_DEVICE_SUCCESS)
+    {
+        while(deviceStatus == HID_DEVICE_SUCCESS || deviceStatus == HID_DEVICE_UNKNOWN_ERROR)
+        {
+            if(currentIndex < 128) // Check that the index is less than the max number of USB devices connectable
+            {
+                deviceStatus = GetHidDevicePath(vid, pid, currentIndex, devicePath);
+            }
+            else // If deviceIndex # is > available HID devices based on VID and PID, break out
+                break;
+
+            if (deviceStatus == HID_DEVICE_SUCCESS)
+            {
+                // Attempt to open the device by VID and PID
+                hHidDeviceHandle = OpenDeviceByVidPid(devicePath, vid, pid, &error,totalDevNum);
+                if (error == ERROR_SHARING_VIOLATION)
+                {
+                    #ifdef DEBUG_MODE
+                    fprintf_s(writeFile, "ERROR_SHARING_VIOLATION\r\n"); //DEBUG: Print error message
+                    #endif
+                    if(deviceNum == deviceIndex)
+                    {
+                        found = TRUE;
+                        status = HID_DEVICE_ALREADY_OPENED;
+                        break;
+                    }
+                    deviceNum++;
+                }
+                
+                // Check that the device is opened and the handle is valid
+                if (hHidDeviceHandle != INVALID_HANDLE_VALUE)
+                {
+                    //Get serial number of handle and convert string to type char 
+                    HidD_GetSerialNumberString(hHidDeviceHandle, HID_Serial_Number,sizeof(HID_Serial_Number));
+                    wcstombs_s(&convertedChars,SerNum,wcslen(HID_Serial_Number)+1,HID_Serial_Number,_TRUNCATE);
+                    matchSerNum=FALSE;
+
+                    if(strlen(newSerNum) == 1) //No serial number is specified in desired device
+                    {
+                       if(SerNum[0] == 0x00)   //Check to see if device also has an empty serial number
+                       {
+                            if(count == atoi(&newSerNum[0]))
+                            {
+                                total++;
+                                matchSerNum = TRUE; 
+                                if(total == totalDevNum)
+                                {
+                                    count=0;
+                                    total=0;
+                                }
+                                else
+                                {
+                                    count++;
+                                    if(count == totalSerNum)
+                                    {
+                                        count=0;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                count ++;
+                                if(count == totalSerNum)
+                                {
+                                    count=0;
+                                }
+                            }
+                       }
+                       else
+                       {
+                           total++;
+                           if(total == totalDevNum)
+                            total--;
+                       }
+                    }
+                    else    //Compare serial number of handle with selected serial number
+                    {
+
+                        if(!strcmp(newSerNum,SerNum))
+                        {
+                            matchSerNum = TRUE;
+                        }
+                    }
+                    //Set found to true if device (interface) number and serial number match
+                    if ((deviceNum == deviceIndex) && matchSerNum)
+                    {
+                        PHIDP_PREPARSED_DATA preparsedData;
+                        OSVERSIONINFO osVer;
+                        found = TRUE;
+                       
+                        // Set the member variables to an opened device and handle
+                        pstrHidDevice->bDeviceOpen = TRUE;
+                        pstrHidDevice->hndHidDevice = hHidDeviceHandle;
+                        pstrHidDevice->oRead.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+                        pstrHidDevice->oWrite.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+                        if (HidD_GetPreparsedData(hHidDeviceHandle, &preparsedData))
+                        {
+                            HIDP_CAPS capabilities;
+                            // Used the preparsed data structure to get the device capabilities
+                            if (HidP_GetCaps(preparsedData, &capabilities))
+                            {
+                                // Allocate memory for the input, output and feature reports
+                                if (capabilities.InputReportByteLength)
+                                {
+                                    pstrHidDevice->wInReportBufferLength = capabilities.InputReportByteLength;
+                                }
+    
+                                if (capabilities.OutputReportByteLength)
+                                {
+                                    pstrHidDevice->wOutReportBufferLength = capabilities.OutputReportByteLength;
+                                }
+                            }            
+                            osVer.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+                            GetVersionEx(&osVer);
+                            // Only set the max report requests if we are using 2K or later
+                            if ((osVer.dwPlatformId == 2) && (osVer.dwMajorVersion == 5))
+                            {
+                                if (osVer.dwMinorVersion >= 1)
+                                {
+                                    // XP or later supports 512 input reports
+                                    err = HidD_SetNumInputBuffers(pstrHidDevice->hndHidDevice, 512);
+                                }    
+                                else if (osVer.dwMinorVersion == 0)
+                                {
+                                    // 2K supports 200 input reports
+                                    err = HidD_SetNumInputBuffers(pstrHidDevice->hndHidDevice, 200);
+                                }
+                            }
+                            // Cleanup the preparesed data
+                            HidD_FreePreparsedData(preparsedData);
+                        }
+                        break;
+                    }
+                    else if(matchSerNum)    //If correct serial number, but not device (interface) number, increase deviceNum 
+                    {
+                        if(deviceNum == totalDevNum-1)        //Make sure deviceNum does not exceed total number of devices with specified serial number 
+                        {
+                            deviceNum =0;
+                        }
+                        deviceNum++;
+                    }
+                }
+                if (!found)
+                {
+                    CloseHandle(hHidDeviceHandle);
+                    currentIndex++;
+                }                
+            }
+            else
+            {
+                currentIndex++;
+            }
+        }
+        // If the device wasnt found, return an error code
+        if (!found)
+        {
+            status = HID_DEVICE_NOT_FOUND;
+        }
+    }
+    return status;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_WriteFile(struct strHidDevice* pstrHidDevice, 
+                   BYTE* buffer, 
+                   DWORD bufferSize)
+{
+    BYTE status = HID_DEVICE_SUCCESS;
+    WORD stillToSend = (WORD)bufferSize;
+    BYTE bytesCount;
+    BYTE report[256], ReportId;
+
+    while((stillToSend >0) && (status == HID_DEVICE_SUCCESS))
+    {
+        // ONLY 63ReportID is available!
+        ReportId = 63;
+        /* if(stillToSend >= 255)
+            ReportId = 255;
+        else if(stillToSend >= 63)
+            ReportId = 63;
+        /*else if(stillToSend >= 32)
+            ReportId = 32;
+        else if(stillToSend >= 17)
+            ReportId = 17; 
+        else ReportId = (BYTE)stillToSend;
+        */
+
+        report[0] = ReportId;                                    // Set ReportId to the 1fst element
+        bytesCount = ReportId-1 > stillToSend ? stillToSend : ReportId-1; // how many bytes will be sent with the report;
+        report[1] = bytesCount;                                 // Set how many valid bytes in the Report
+        memcpy(&report[2],buffer,bytesCount);                    // Copy data from buffer to the report
+        buffer += bytesCount;                                    // Set pointer to the next data
+        stillToSend -= bytesCount;                                // decrement "stillToSend" for outstanding data
+
+        // Check to see that the device is opened
+        if (pstrHidDevice->bDeviceOpen)
+        {
+            DWORD bytesWritten = 0;
+
+            // Try to write the file
+            //TRACE("HID_WriteFile:Try to write the file");
+            if (!WriteFile(pstrHidDevice->hndHidDevice, report, pstrHidDevice ->wOutReportBufferLength, &bytesWritten, &pstrHidDevice->oWrite))
+            {
+                // If the write fails, see if it is because IO is pending
+                if (GetLastError() == ERROR_IO_PENDING)
+                {
+                    DWORD waitStatus;
+
+                    //If there is still data to be written, wait on the event for 3 seconds
+                    waitStatus = WaitForSingleObject(pstrHidDevice->oWrite.hEvent, pstrHidDevice->uSetReportTimeout);
+                    
+                    // If the object is signaled, then get the overlapped result, the write succeeded
+                    // Otherwise determine if the error was a timeout, or another error
+                    if (waitStatus == WAIT_OBJECT_0)
+                    {
+                        GetOverlappedResult(pstrHidDevice ->hndHidDevice, &pstrHidDevice->oWrite, &bytesWritten, FALSE);
+                    }
+                    else if (waitStatus == WAIT_TIMEOUT)
+                    {
+                        //TRACE("HID_WriteFile:waitStatus = WAIT_TIMEOUT");
+                        status = HID_DEVICE_TRANSFER_TIMEOUT;
+                        CancelIo(pstrHidDevice ->hndHidDevice);
+                    }
+                    else
+                    {
+                        //TRACE("HID_WriteFile:HID_DEVICE_TRANSFER_FAILED");
+                        status = HID_DEVICE_TRANSFER_FAILED;
+                        CancelIo(pstrHidDevice ->hndHidDevice);
+                    }
+                
+                }
+                else
+                {
+                    //TRACE("HID_WriteFile:HID_DEVICE_TRANSFER_FAILED");
+                    status = HID_DEVICE_TRANSFER_FAILED;
+                }
+            }
+        }
+        else
+        {
+            //TRACE("HID_WriteFile:HID_DEVICE_NOT_OPENED");
+            status = HID_DEVICE_NOT_OPENED;
+        }
+    }
+
+    return status;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_ReadFile(struct strHidDevice* pstrHidDevice, 
+                  BYTE* buffer, 
+                  DWORD bufferSize, 
+                  DWORD* bytesReturned)
+{
+    BYTE status = HID_DEVICE_SUCCESS;
+    DWORD time[5],bytesRead = 0;
+    UINT reportSize;
+    UINT totalReportSizeRead = 0;
+
+    DWORD stillToRead = bufferSize;
+    if(pstrHidDevice->inBufferUsed > stillToRead) // Checks if inBuffer has more data than stillToRead
+    {
+        memcpy(buffer,pstrHidDevice->inBuffer,bufferSize);
+        pstrHidDevice->inBufferUsed -= (WORD)bufferSize;
+        memcpy(pstrHidDevice->inBuffer,&pstrHidDevice->inBuffer[bufferSize],pstrHidDevice->inBufferUsed);
+        stillToRead -= bufferSize;
+        buffer += bufferSize;
+    }
+    else if(pstrHidDevice->inBufferUsed > 0)
+    {
+        memcpy(buffer,pstrHidDevice->inBuffer,pstrHidDevice->inBufferUsed);
+        stillToRead -= pstrHidDevice->inBufferUsed;
+        buffer += pstrHidDevice->inBufferUsed;
+        pstrHidDevice->inBufferUsed = 0;
+    }
+    while((stillToRead>0) && (status==HID_DEVICE_SUCCESS))
+    {
+        // Check to see that the device is opened
+        if (pstrHidDevice->bDeviceOpen)
+        {
+
+            // Try to read input data
+                            
+            if (!ReadFile(pstrHidDevice->hndHidDevice, pstrHidDevice->inBuffer, pstrHidDevice->wInReportBufferLength, &bytesRead, &pstrHidDevice->oRead))
+            {
+                DWORD error = GetLastError();
+                // If the read fails, see if it is because IO is pending
+                time[0] = GetTickCount();
+                if (error == ERROR_IO_PENDING)
+                {
+                    // If there is still data to read, wait on the event object based on uGetReportTimeout
+                    DWORD waitStatus = WaitForSingleObject(pstrHidDevice->oRead.hEvent, pstrHidDevice->uGetReportTimeout);
+                    // If the object is signaled, then get the overlapped result, the read succeeded
+                    // Otherwise determine if the error was a timeout, or another error
+                    if (waitStatus == WAIT_OBJECT_0)
+                    {                        
+                        GetOverlappedResult(pstrHidDevice->hndHidDevice, &pstrHidDevice->oRead, &bytesRead, FALSE);                        
+                    }
+                    else if (waitStatus == WAIT_TIMEOUT)
+                    {
+                        CancelIo(pstrHidDevice->hndHidDevice);
+                        if(totalReportSizeRead > 0) // Means that data was read and buffer specified is larger
+                            break;
+                        else
+                            status = HID_DEVICE_TRANSFER_TIMEOUT;
+                    }
+                    else
+                    {
+                        status = HID_DEVICE_TRANSFER_FAILED;
+                        CancelIo(pstrHidDevice->hndHidDevice);
+                    }                    
+                }
+            
+                else
+                {
+                    status = HID_DEVICE_TRANSFER_FAILED;
+                }
+            }
+            
+            if(status == HID_DEVICE_SUCCESS)
+            {
+                if(pstrHidDevice->inBuffer[0] == 63)
+                {
+                    reportSize = (pstrHidDevice->inBuffer[1]); 
+                    totalReportSizeRead = totalReportSizeRead + reportSize;
+                    if(reportSize > stillToRead) //If received report size is greater than # of bytes to read
+                    {
+                        memcpy(buffer,&pstrHidDevice->inBuffer[2],stillToRead);
+                        pstrHidDevice->inBufferUsed = pstrHidDevice->inBuffer[1];
+                        pstrHidDevice->inBufferUsed -= (WORD)stillToRead;
+                        memcpy(pstrHidDevice->inBuffer,&pstrHidDevice->inBuffer[stillToRead+2],pstrHidDevice->inBufferUsed);
+                        stillToRead = 0;
+                    }
+                    else
+                    {
+                        memcpy(buffer,(pstrHidDevice->inBuffer + 2),reportSize);
+                        pstrHidDevice->inBufferUsed = 0;
+                        stillToRead -= reportSize;
+                        buffer += reportSize;
+                    }
+                }
+            }
+            
+        }
+        else
+        {
+            status = HID_DEVICE_NOT_OPENED;
+        }
+    }
+
+    *bytesReturned = bufferSize - stillToRead;
+
+    return status;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_FlushBuffer(struct strHidDevice* pstrHidDevice)
+{
+    BYTE status = HID_DEVICE_SUCCESS;
+    pstrHidDevice->inBufferUsed = 0;
+    
+    if(FALSE == HidD_FlushQueue(pstrHidDevice->hndHidDevice))
+    {
+        if(ERROR_INVALID_HANDLE == GetLastError())
+        {
+            status = HID_DEVICE_HANDLE_ERROR;
+        }
+        else
+            status = HID_DEVICE_UNKNOWN_ERROR; 
+        if(status != HID_DEVICE_SUCCESS)
+            return status;
+    }
+    
+    return HID_DEVICE_SUCCESS;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_GetVersionNumber(struct strHidDevice* pstrHidDevice, 
+                          USHORT * VersionNumber)
+{
+    HIDD_ATTRIBUTES Hid_Attributes;
+    
+    if(HidD_GetAttributes(pstrHidDevice->hndHidDevice,&Hid_Attributes) == FALSE)
+        return HID_DEVICE_HANDLE_ERROR;
+
+    *VersionNumber = Hid_Attributes.VersionNumber;
+    return HID_DEVICE_SUCCESS;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_RegisterForDeviceNotification(HWND hWnd, 
+                                       HDEVNOTIFY* diNotifyHandle)
+{
+    DEV_BROADCAST_DEVICEINTERFACE broadcastInterface;
+
+    broadcastInterface.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
+    broadcastInterface.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    HidD_GetHidGuid(&broadcastInterface.dbcc_classguid);
+
+    *diNotifyHandle = RegisterDeviceNotification(hWnd, &broadcastInterface, DEVICE_NOTIFY_WINDOW_HANDLE);
+
+    #ifdef DEBUG_MODE
+    HID_CreateNewFileForDebugMode("c:\\UsbApp.log"); // DEBUG: Creates a new file whenever the program opens:
+    #endif
+
+    if (NULL == diNotifyHandle)
+        return HID_DEVICE_HANDLE_ERROR;
+    else
+        return HID_DEVICE_SUCCESS;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BYTE HID_UnRegisterForDeviceNotification(HDEVNOTIFY* diNotifyHandle)
+{
+#ifdef DEBUG_MODE
+    fclose (writeFile); //DEBUG: close handle when program exits
+#endif
+
+    if(UnregisterDeviceNotification(*diNotifyHandle))
+    {
+        return HID_DEVICE_SUCCESS;
+    }
+    else
+        return HID_DEVICE_HANDLE_ERROR;
+}
+
+//******************************************************************************
+
+__declspec(dllexport) BOOL HID_IsDeviceAffected(struct strHidDevice* pstrHidDevice)
+{
+    HIDD_ATTRIBUTES    hidDeviceAttributes;
+    BOOL deviceRemoved = TRUE;
+
+    // User HID attributes with HID handle of the HID device to check if device is still connected
+    if (HidD_GetAttributes(pstrHidDevice->hndHidDevice, &hidDeviceAttributes))
+    {
+        deviceRemoved = FALSE;        // Returns FALSE if device is still connected
+        return deviceRemoved;
+    }
+    else
+    {
+        return deviceRemoved;        // Returns TRUE if device is NOT connected
+    }
+}
+
+
+/*
+__declspec(dllexport) int 
+//
+pomnoz(int a,int b)
+{
+return a*b;
+}
+*/

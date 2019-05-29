@@ -1,0 +1,24 @@
+﻿<Window x:Class="Uzycie_Manipulatora.Window1"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Pokrec pokretelem lub nacisnij klawisz klawiatury" Height="525" Width="636">
+    <Grid>
+        <!--<TextBlock Margin="35,16,33,114" Name="textBlock1" />-->
+        <!--<Button Click="Button_Click" Content="Start thread"/>
+        <Button Height="21.96" Width="614" Click="Button_Click_1">Stop thread</Button>-->
+
+<!--
+        <Button HorizontalAlignment="Left" Margin="31.673,0,0,13.381" Name="bStopThread" Width="120.024" Height="38.341" VerticalAlignment="Bottom" Click="bStopThread_Click">Stop Thread</Button>
+        <Button Margin="298.393,0,150.03,13.381" Name="bStartThread" Height="38.341" VerticalAlignment="Bottom" Click="bStartThread_Click">Start Thread</Button>
+        <Button Content="Manip" Height="38.341" HorizontalAlignment="Right" Margin="0,0,50.01,10.002" Name="bManip" VerticalAlignment="Bottom" Width="50.01" Click="bManip_Click" />
+-->
+        <Button Height="31" Margin="232,0,241,9" Name="bClearMainTextBox" VerticalAlignment="Bottom" Click="bClearMainTextBox_Click">Clear Text Window</Button>
+        <ScrollViewer Margin="15.003,10.002,21.671,75">
+        <TextBlock  Name="MainTextBlock" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                    ScrollViewer.VerticalScrollBarVisibility="Visible" Height="292" />
+        </ScrollViewer>
+        
+
+        
+    </Grid>
+</Window>

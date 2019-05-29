@@ -1,0 +1,66 @@
+﻿<Window x:Class="Uzycie_Manipulatora.Window1"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Pokrec pokretlem lub nacisnij klawisz klawiatury HID" FontSize="12"   Height="600" Width="850" Left="300">
+    <Grid> <!-- // window content, window moze miec jedno dziecko;
+        logical tree - zawieranie
+        -->
+        
+        <!--children.add-->
+        
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <!--domyslnie jedna *-->
+            <RowDefinition Height="100" />
+        </Grid.RowDefinitions>
+
+        <Canvas x:Name="myCanvas" Grid.Row="0" >
+
+            <!--
+            <Canvas.Background>
+                <LinearGradientBrush EndPoint="1,0.5" StartPoint="0,0.5">
+                    <GradientStop Color="#FFFF00C1" Offset="0.028" />
+                    <GradientStop Color="#FF37EF00" Offset="0.948" />
+                </LinearGradientBrush>
+            </Canvas.Background>
+            -->
+
+            <!--<TextBlock TextWrapping="Wrap"/>-->
+            <Button Canvas.Left="737.364" Canvas.Top="365.824" Height="32.867" Name="button1" Width="77.166" Click="button1_Click">Clear Text</Button>
+        </Canvas>
+
+
+        <!-- Wytswietla tyle elementów ile jest ich w kolejkcjio-->
+        <ItemsControl x:Name="myItemsControl" Grid.Row="1" ItemsSource="{Binding LedCollection}" 
+                      Background="BlueViolet" >
+
+            <!--definiuje panel dla wszystkich elementow-->
+            <!--sposob ulozenia elementow, np horizontal-->
+            <ItemsControl.ItemsPanel >
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center">
+                      
+
+                    </StackPanel>
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+
+            
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <ItemsControl>
+                        <!-- kazdy element kolekcji ma byc reprezentowany przez checkboxa-->
+                        <CheckBox Margin="3" Content="{Binding LedIndex_str}" IsChecked="{Binding IsOn}" />
+
+
+                    </ItemsControl>
+
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+
+        </ItemsControl>
+
+    </Grid>
+</Window>
